@@ -10,6 +10,10 @@ const STREAM_CACHE_TTL_MS = 5 * 60 * 1_000;
 const streamCache = new Map();
 const streamRequests = new Map();
 
+function streamCacheKey(videoId, ps = "") {
+  return `${videoId}\u0000${ps}`;
+}
+
 function pruneStreamCache(now = Date.now()) {
   for (const [key, entry] of streamCache) {
     if (!entry || now - entry.createdAt >= STREAM_CACHE_TTL_MS) {
@@ -449,29 +453,32 @@ export function stream(videoId, options = {}) {
   if (!/^[A-Za-z0-9_-]{11}$/.test(id)) {
     throw validationError("videoId must be an 11-character YouTube video ID");
   }
+  const ps = typeof options.ps === "string" ? options.ps.trim() : "";
   if (options.signal?.aborted) return Promise.reject(abortError(options.signal));
 
   const now = Date.now();
   pruneStreamCache(now);
-  const cached = streamCache.get(id);
+  const cacheKey = streamCacheKey(id, ps);
+  const cached = streamCache.get(cacheKey);
   if (!options.forceRefresh && cached && now - cached.createdAt < STREAM_CACHE_TTL_MS) {
     return withSignal(Promise.resolve(cached.data), options.signal);
   }
-  if (cached) streamCache.delete(id);
+  if (cached) streamCache.delete(cacheKey);
 
-  let pending = streamRequests.get(id);
+  let pending = streamRequests.get(cacheKey);
   if (!pending) {
     pending = getJson(`/api/stream/${pathSegment(id, "videoId")}`, {
       ...requestOptions({ ...options, signal: undefined }),
+      query: { ps: ps || undefined },
     })
       .then((data) => {
-        streamCache.set(id, { createdAt: Date.now(), data });
+        streamCache.set(cacheKey, { createdAt: Date.now(), data });
         return data;
       })
       .finally(() => {
-        streamRequests.delete(id);
+        streamRequests.delete(cacheKey);
       });
-    streamRequests.set(id, pending);
+    streamRequests.set(cacheKey, pending);
   }
 
   return withSignal(pending, options.signal);
@@ -482,7 +489,10 @@ export function clearStreamCache(videoId) {
     streamCache.clear();
     return;
   }
-  streamCache.delete(requireString(videoId, "videoId"));
+  const prefix = `${requireString(videoId, "videoId")}\u0000`;
+  for (const key of streamCache.keys()) {
+    if (key.startsWith(prefix)) streamCache.delete(key);
+  }
 }
 
 export {

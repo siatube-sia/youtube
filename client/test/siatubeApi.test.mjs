@@ -71,6 +71,29 @@ test("same-video stream requests share one in-flight API call and cache", async 
   assert.deepEqual(second, third);
 });
 
+test("stream supports the type 2 ps query without sharing the default cache", async (t) => {
+  clearStreamCache();
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    return jsonResponse({ streams: { muxed: [] } });
+  };
+  t.after(() => {
+    clearStreamCache();
+    globalThis.fetch = originalFetch;
+  });
+
+  await stream("dQw4w9WgXcQ", { ps: "siatube" });
+  await stream("dQw4w9WgXcQ");
+
+  assert.equal(
+    urls[0],
+    "https://siatube.com/api/stream/dQw4w9WgXcQ?ps=siatube",
+  );
+  assert.equal(urls[1], "https://siatube.com/api/stream/dQw4w9WgXcQ");
+});
+
 test("Apps Script deployments call SiaTube directly", async (t) => {
   const originalWindow = globalThis.window;
   const originalFetch = globalThis.fetch;
